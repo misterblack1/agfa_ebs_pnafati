@@ -1,20 +1,6 @@
 # Hardware Reference Manual
-**Platform:** Motorola 68000 Printer Controller
-**Architecture:** 24-bit Address Bus, 16-bit Data Bus, Polled I/O
-
-
-## User programs: 
-
-Stack pointer $14000
-RAM safe to use from $10100. (16k total RAM used miuns the first $FF bytes used by the monitor.)
-
-Entry points:
-PUTCHAR $900 - D0 character to print
-GETCHAR $940 - Please character on D0
-PRINT_STR $970 - Load pointer to string in A0, terminate strings with 0,0 
-GETLINE $A10 - Pointer to string is in A0
-
-To return to the monitor, perform a JSR. 
+* Platform: Motorola 68000 Printer Controller
+* Architecture: 24-bit Address Bus, 16-bit Data Bus, Polled I/O
 
 ## 1. Memory Map Overview
 The system uses a simple 3-to-8 address decoder connected to Address lines **A16, A17, and A18**. Each block is allocated 64KB ($10000 bytes) of address space. 
@@ -38,19 +24,19 @@ The Motorola 68000 requires a peripheral to assert the `DTACK` (Data Transfer Ac
 ---
 
 ## 2. DUART (MC68681) Port Definitions
-**Base Address:** `$040000` (Mapped to the ODD byte lane, `D0-D7`)
-The DUART serves as the central serial console and the primary General Purpose I/O controller for the front panel.
+* Base Address:  `$040000` (Mapped to the ODD byte lane, `D0-D7`)
+* The DUART serves as the central serial console and the primary General Purpose I/O controller for the front panel.
 
 MC68681 DUART1_BASE EQU $040000
-MR1A        EQU DUART1_BASE+$01
-MR2A        EQU DUART1_BASE+$01
-SRA         EQU DUART1_BASE+$03
-CSRA        EQU DUART1_BASE+$03
-CRA         EQU DUART1_BASE+$05
-RxA         EQU DUART1_BASE+$07
-TxA         EQU DUART1_BASE+$07
-ACR         EQU DUART1_BASE+$09
-IMR         EQU DUART1_BASE+$0B
+* MR1A        EQU DUART1_BASE+$01
+* MR2A        EQU DUART1_BASE+$01
+* SRA         EQU DUART1_BASE+$03
+* CSRA        EQU DUART1_BASE+$03
+* CRA         EQU DUART1_BASE+$05
+* RxA         EQU DUART1_BASE+$07
+* TxA         EQU DUART1_BASE+$07
+* ACR         EQU DUART1_BASE+$09
+* IMR         EQU DUART1_BASE+$0B
 
 ### 2.1 Front Panel Status LEDs
 The LEDs are connected to the DUART's **Output Port (OP)**. Interestingly, the engineers used mixed logic (sinking vs. sourcing current), meaning the bits behave oppositely for the two LEDs.
@@ -63,10 +49,10 @@ The LEDs are connected to the DUART's **Output Port (OP)**. Interestingly, the e
 | **Amber LED** | OP5 | `$20` | Active-LOW | Write `$20` to `$04001D` | Write `$20` to `$04001F` |
 | **Red LED** | OP7 | `$80` | Active-HIGH | Write `$80` to `$04001F` | Write `$80` to `$04001D` |
 
-*Note: OP6 (`$40`) is also actively driven by the firmware and likely goes to a third unpopulated LED or internal system flag.*
+*Note: OP6 (`$40`) is also actively driven by the original firmware and likely goes to another device on the board.*
 
 ### 2.2 Front Panel Inputs (Buttons & Switches)
-The momentary button and rotary dial are connected to the DUART's **Input Port (IP)**. They can be read at address **`$04001B`**.
+The momentary button and numeric sector switch are connected to the DUART's **Input Port (IP)**. They can be read at address **`$04001B`**.
 
 All inputs are **Active-LOW** (they read as `1` when resting, and drop to `0` when pressed/selected) and have hardware pull-up resistors.
 
