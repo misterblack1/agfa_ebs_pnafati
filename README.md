@@ -17,16 +17,18 @@ This project started with this board containing a 68000 CPU, 64K of ROM, 16KB of
 
 ---
 
-## Hardware Memory Map
+## Hardware Memory Map and Notes
 
 | Logical Block | Address Range | Physical Device | Description |
 | :--- | :--- | :--- | :--- |
 | **Block 0** | `$000000 - $00FFFF` | **ROM (EPROM)** | 64KB Physical. Boot Vectors & 68K-MON Firmware. |
-| **Block 1** | `$010000 - $01FFFF` | **SRAM** | 16KB Physical. Stack at `$014000`. User code starts at `$010100`. |
+| **Block 1** | `$010000 - $01FFFF` | **SRAM** | 16KB Actual but 64KB mapped to SRAM sockets. Stack at `$014000`. User code starts at `$010100`. |
 | **Block 2** | `$020000 - $02FFFF` | **FIFO (MK4501)** | High-Speed Buffer array. |
 | **Block 3** | `$030000 - $03FFFF` | **FIFO (Mirror)** | Alias of Block 2. |
 | **Block 4** | `$040000 - $04FFFF` | **DUART (MC68681)** | System Console, Front Panel I/O, LED Control. |
 | **Block 5-7** | `$050000 - $07FFFF` | *Unpopulated* | Dead zones. Accessing these freezes the CPU (No DTACK). |
+
+`/RESET` and `/HALT` on the CPU are tied together. They are supplied to the CPU from connector P1, normally fed from another board. In order to use this board, you will need to create your own reset circuit. (I am using the /PWR_GOOD signal on the AT PSU connector via a resistor.)
 
 ---
 
@@ -81,11 +83,17 @@ You can write your own 68k assembly programs, assemble them to Motorola S-Record
 
 ---
 
-## Building the Code (Unified Source)
+## Building and running the Code
 The `swtbug-v6.m68` source file is written for **Easy68K**. Assembled, it will run on the real hardware.
 
 **To build for Physical EPROMs:**
 In Easy68K, you need to assembly the code. Then use SIM68k to load the assembled code and use the memory viewer to save the first 64k of address space to a BIN file. This is your ROM code to run on real hardware. You must byte split the file as real hardware requires two 8 bit EPROMs.
+
+When the system powers up, the RED led will on the control panel will always illumate. When the ROM initializes the DUART, it will turn on the AMBER LED. This is a good indicator the code is running. The system prompt will be `68K-MON 0>` where the 0 will be replaced with whatever the front numeric switch is set to. (0-7 is possible.)
+
+When the system executes a command, the RED LED will turn off while the command executes, and will illuminate again when the command is finished. 
+
+The `STOP` button on the front panel will only work when at the prompt, due to the nature of how the system does not support IRQs. 
 
 ---
 
