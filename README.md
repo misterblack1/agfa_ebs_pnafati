@@ -2,16 +2,20 @@
 
 **68K-MON** is a fully functional, UNIX-style ROM monitor built from scratch for a surplus Motorola 68000-based Agfa RIP/Printer controller I/O board. 
 
+![Boot message](https://github.com/misterblack1/agfa_ebs_pnafati/blob/main/images/Boot.png?raw=true)
+
 This repository documents the reverse-engineering of the board's undocumented memory map, DUART wiring, and front-panel logic, culminating in a custom 64KB ROM that turns the printer controller into a fully programmable 68k single-board computer.
 
-## The Story: Reverse-Engineering the Hardware
+## Reverse-Engineering
 This project started with this board containing a 68000 CPU, 64K of ROM, 16KB of SRAM, an MC68681 Dual UART (DUART), an MK4501N High-Speed FIFO, and a front panel with a numeric dial and LEDs. By dumping and forensically analyzing the original ROM, we deduced the address decoder logic and peripheral wiring.
 
-### Key Discoveries:
+### Hardware Notes
 * **The "Ghost" Memory:** The board uses a simple 3-to-8 address decoder connected to address lines `A16`, `A17`, and `A18`. Because `A19-A23` are ignored, the entire 512KB physical memory map echoes infinitely throughout the 68000's 16MB address space.
 * **Polled I/O:** The original vector table was entirely blank (`$FFFFFFFF`) or pointed to infinite loops. The board relies 100% on polling and does not use hardware interrupts.
 * **The 68681 DUART Does Everything:** Because it's the only major logic chip on the board, the DUART isn't just used for serial communication. Its General Purpose I/O pins control the front panel LEDs, read the front panel numeric dial, read the Stop button, and manage the MK4501 FIFO flags.
 * **Odd-Byte Lane:** The DUART is wired exclusively to the lower half of the 16-bit data bus (`D0-D7`), meaning its registers only exist at odd memory addresses.
+
+![Hardware board](https://github.com/misterblack1/agfa_ebs_pnafati/blob/main/images/Agfa%20Board.jpg?raw=true)
 
 ---
 
@@ -91,3 +95,5 @@ In Easy68K, you need to assembly the code. Then use SIM68k to load the assembled
 Included in this repo is `fractal calculation-v6.x68`. This is an example user program meant to be loaded into RAM at `$010100` using but using the `L` command and pasting the S-records from `fractal calculation-v6.S68` into your terminal window. Use `G 10100` to start the program.
 
 Because the 68000 lacks an FPU, this program uses **Fixed-Point Arithmetic** to natively calculate and render an ASCII Mandelbrot fractal directly to the serial terminal, proving the stability of the API vectors and the hardware's math execution.
+
+![Fractal](https://github.com/misterblack1/agfa_ebs_pnafati/blob/main/images/fractal.png?raw=true)
