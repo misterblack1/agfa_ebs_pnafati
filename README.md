@@ -7,6 +7,10 @@
 ## Reverse-Engineering
 This project started with this board containing a 68000 CPU, 64K of ROM, 16KB of SRAM, an MC68681 Dual UART (DUART), an MK4501N High-Speed FIFO, and a front panel with a numeric dial and LEDs. By dumping and forensically analyzing the original ROM, we deduced the address decoder logic and peripheral wiring.
 
+Video exploration and teardown of Compugraphic 9000PS on [Adrian's Digital Basement](https://www.youtube.com/watch?v=2rAgdZ9zBuA)
+
+Original dumps of the ROMs from this machine are available at [https://archive.org/details/agfa-computgraphi-9000-ps](https://archive.org/details/agfa-computgraphi-9000-ps)
+
 ### Hardware Notes
 * **The "Ghost" Memory:** The board uses a simple 3-to-8 address decoder connected to address lines `A16`, `A17`, and `A18`. Because `A19-A23` are ignored, the entire 512KB physical memory map echoes infinitely throughout the 68000's 16MB address space.
 * **Polled I/O:** The original vector table was entirely blank (`$FFFFFFFF`) or pointed to infinite loops. The board relies 100% on polling and does not use hardware interrupts.
@@ -15,6 +19,7 @@ This project started with this board containing a 68000 CPU, 64K of ROM, 16KB of
 
 ![Hardware board](https://github.com/misterblack1/agfa_ebs_pnafati/blob/main/images/Agfa%20Board.jpg?raw=true)
 
+![Agfa Computergraphic 9000PS](https://github.com/misterblack1/agfa_ebs_pnafati/blob/main/images/Compugraphic9000ps.jpg?raw=true)
 ---
 
 ## Hardware Memory Map and Notes
