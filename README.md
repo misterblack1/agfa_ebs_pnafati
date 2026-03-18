@@ -1,6 +1,6 @@
-# 68K-MON: System Monitor ROM for Agfa EBS PNAFATI1++A Printer I/O board
+# 68K-MON: Custom System Monitor ROM for the Agfa Compugraphic 9000PS I/O board
 
-**68K-MON** is a fully functional, SWTBUG-like ROM monitor built from scratch for a surplus Motorola 68000-based Agfa RIP/Printer controller I/O board. 
+**68K-MON** is a fully functional, SWTBUG-like ROM monitor built from scratch for the Motorola 68000-based I/O board inside the Agfa Compugraphic 9000PS RIP (Raster Image Processor.) The I/O board is maked `AGFA EBS PNAFATI1++A`.
 
 ![Boot message](https://github.com/misterblack1/agfa_ebs_pnafati/blob/main/images/Boot.png?raw=true)
 
