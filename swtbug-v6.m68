@@ -1,0 +1,810 @@
+; =====================================================================
+; 68K-MON: Hardware-Reverse-Engineered Custom Monitor
+; Platform: Custom Motorola 68000 Printer Board (REAL HARDWARE)
+; =====================================================================
+
+    ORG $0
+    DC.L    $014000         ; Reset SSP
+    DC.L    START_VEC       ; Reset PC
+
+; --- Hardware Memory Map ---
+RAM_START   EQU $010000
+DUART_BASE  EQU $040000
+
+; --- Register Save Area (in early SRAM) ---
+SAVE_D0     EQU RAM_START+$00   ; 32 bytes (D0-D7)
+SAVE_A0     EQU RAM_START+$20   ; 28 bytes (A0-A6)
+SAVE_PC     EQU RAM_START+$3C   ; 4 bytes
+SAVE_SR     EQU RAM_START+$40   ; 2 bytes
+LAST_DUMP   EQU RAM_START+$42   ; 4 bytes
+LINE_BUF    EQU RAM_START+$46   ; 128 bytes buffer
+
+; =====================================================================
+; USER PROGRAMMING API & ENTRY POINTS
+; =====================================================================
+; To write your own programs, assemble them starting at RAM ($010100).
+; Use these fixed jump vectors to interact with the console safely.
+; 
+; Call these via JSR (e.g., jsr $0406):
+; $0406 - PUTCHAR : Prints D0.B to terminal. Preserves all other registers.
+; $040C - GETCHAR : Reads terminal into D0.B. Preserves all other registers.
+; $0412 - PRINT   : Prints null-terminated string at A0. Preserves all regs.
+; $0418 - GETLINE : Reads line into buffer at A0. Preserves all registers.
+; 
+; Call this via JMP (e.g., jmp $041E) to exit your program:
+; $041E - EXIT    : Safely terminates your program and returns to Monitor.
+; =====================================================================
+
+    ORG $400
+    
+; --- API Jump Table (Exactly 36 bytes) ---
+START_VEC:  jmp START           ; $0400
+PUT_VEC:    jmp PUTCHAR         ; $0406
+GET_VEC:    jmp GETCHAR         ; $040C
+PRT_VEC:    jmp PRINT_STR       ; $0412
+GL_VEC:     jmp GETLINE         ; $0418
+EXIT_VEC:   jmp MAIN_LOOP       ; $041E
+
+; =====================================================================
+; BOOT SEQUENCE
+; =====================================================================
+START:
+    movea.l #$014000, A7    ; Initialize Stack Pointer
+    
+    ; Clear Register Save Area so 'R' command is clean on boot
+    lea     SAVE_D0, A0
+    moveq   #17, D0         ; Clear 18 longwords (72 bytes)
+.clr_regs:
+    clr.l   (A0)+
+    dbf     D0, .clr_regs
+    move.w  #$2700, SAVE_SR ; Set default Supervisor SR
+    
+    bsr     INIT_HW         ; Configure DUART and turn on Amber LED
+    
+    lea     STR_BANNER, A0  ; Print the welcome banner
+    bsr     PRINT_STR
+    lea     STR_HELP, A0    ; Print the command help menu
+    bsr     PRINT_STR
+
+MAIN_LOOP:
+    bsr     LED_RED_ON      ; Turn Red LED ON (Indicates Idle/Ready state)
+    bsr     PRINT_CRLF
+    
+    lea     STR_PROMPT, A0
+    bsr     PRINT_STR       ; Print "68K-MON "
+    bsr     GET_DIAL        ; Reads front panel dial into D0.B
+    bsr     PUTCHAR         ; Print the dial number
+    lea     STR_P_TAIL, A0
+    bsr     PRINT_STR       ; Print "> "
+    
+    bsr     GETLINE
+    
+    lea     LINE_BUF, A0
+    bsr     SKIP_SPACES
+    move.b  (A0)+, D0
+    beq     MAIN_LOOP       ; Ignore empty strings
+
+    bsr     LED_RED_OFF     ; Turn Red LED OFF (Indicates Busy state)
+
+    ; Case-Insensitive conversion
+    cmp.b   #'a', D0
+    blt     .chk_cmd
+    cmp.b   #'z', D0
+    bgt     .chk_cmd
+    sub.b   #$20, D0
+    
+.chk_cmd:
+    cmp.b   #'?', D0
+    beq     CMD_H
+    cmp.b   #'H', D0
+    beq     CMD_H
+    cmp.b   #'M', D0
+    beq     CMD_M
+    cmp.b   #'D', D0
+    beq     CMD_D
+    cmp.b   #'L', D0
+    beq     CMD_L
+    cmp.b   #'P', D0
+    beq     CMD_P
+    cmp.b   #'F', D0
+    beq     CMD_F
+    cmp.b   #'G', D0
+    beq     CMD_G
+    cmp.b   #'R', D0
+    beq     CMD_R
+    cmp.b   #'E', D0
+    beq     CMD_E
+
+PRINT_ERR:
+    lea     STR_ERR, A0
+    bsr     PRINT_STR
+    bra     MAIN_LOOP
+
+; =====================================================================
+; COMMAND ROUTINES
+; =====================================================================
+
+; --- H: Show Help ---
+CMD_H:
+    lea     STR_HELP, A0
+    bsr     PRINT_STR
+    bra     MAIN_LOOP
+
+; --- E: Edit Register ---
+CMD_E:
+    bsr     SKIP_SPACES
+    move.b  (A0)+, D1
+    cmp.b   #'a', D1
+    blt     .e_chk
+    sub.b   #$20, D1        ; Upcase
+.e_chk:
+    cmp.b   #'D', D1
+    beq     .e_D
+    cmp.b   #'A', D1
+    beq     .e_A
+    cmp.b   #'P', D1
+    beq     .e_PC
+    cmp.b   #'S', D1
+    beq     .e_S
+    bra     PRINT_ERR
+.e_D:
+    move.b  (A0)+, D2
+    sub.b   #'0', D2
+    cmp.b   #7, D2
+    bhi     PRINT_ERR
+    ext.w   D2
+    ext.l   D2
+    lsl.l   #2, D2
+    lea     SAVE_D0, A1
+    add.l   D2, A1
+    bra     .e_read
+.e_A:
+    move.b  (A0)+, D2
+    sub.b   #'0', D2
+    cmp.b   #7, D2
+    bhi     PRINT_ERR
+    ext.w   D2
+    ext.l   D2
+    lsl.l   #2, D2
+    lea     SAVE_A0, A1
+    add.l   D2, A1
+    bra     .e_read
+.e_PC:
+    move.b  (A0)+, D2
+    cmp.b   #'c', D2
+    beq     .e_pc_ok
+    cmp.b   #'C', D2
+    bne     PRINT_ERR
+.e_pc_ok:
+    lea     SAVE_PC, A1
+    bra     .e_read
+.e_S:
+    move.b  (A0)+, D2
+    cmp.b   #'r', D2
+    beq     .e_sr_ok
+    cmp.b   #'R', D2
+    beq     .e_sr_ok
+    cmp.b   #'s', D2
+    beq     .e_ss_ok
+    cmp.b   #'S', D2
+    beq     .e_ss_ok
+    bra     PRINT_ERR
+.e_sr_ok:
+    lea     SAVE_SR, A1
+    bsr     PARSE_HEX
+    beq     PRINT_ERR
+    move.w  D0, (A1)
+    bra     MAIN_LOOP
+.e_ss_ok:
+    move.b  (A0), D2
+    cmp.b   #'P', D2
+    beq     .e_ssp_eat
+    cmp.b   #'p', D2
+    bne     .e_ssp_done
+.e_ssp_eat:
+    addq.l  #1, A0
+.e_ssp_done:
+    lea     SAVE_A0+28, A1
+.e_read:
+    bsr     PARSE_HEX
+    beq     PRINT_ERR
+    move.l  D0, (A1)
+    bra     MAIN_LOOP
+
+; --- M: Memory Modify ---
+CMD_M:
+    bsr     PARSE_HEX
+    beq     PRINT_ERR       ; Z=1 means empty/invalid, throw error
+    move.l  D0, A1          ; A1 = Target Address
+    moveq   #0, D5          ; Flag for inline arguments
+.m_args_loop:
+    bsr     PARSE_HEX
+    beq     .m_chk_int      ; If no more args, check if we need interactive mode
+    move.b  D0, (A1)+
+    moveq   #1, D5
+    bra     .m_args_loop
+.m_chk_int:
+    tst.b   D5              ; If we had inline args, exit immediately
+    bne     MAIN_LOOP
+
+.m_interactive:
+    move.l  A1, D0
+    bsr     PRINT_HEX32
+    move.b  #':', D0
+    bsr     PUTCHAR
+    move.b  #' ', D0
+    bsr     PUTCHAR
+    move.b  (A1), D0        ; Current Byte
+    bsr     PRINT_HEX8
+    move.b  #' ', D0
+    bsr     PUTCHAR
+    move.b  #'-', D0
+    bsr     PUTCHAR
+    move.b  #' ', D0
+    bsr     PUTCHAR
+    
+    bsr     GETLINE
+    lea     LINE_BUF, A0
+    bsr     PARSE_HEX       ; Read user byte
+    beq     MAIN_LOOP       ; Empty input (Enter) exits interactive mode safely
+    move.b  D0, (A1)+       ; Write and auto-increment
+    bra     .m_interactive
+
+; --- D: Hex Dump ---
+CMD_D:
+    bsr     PARSE_HEX
+    beq     .d_use_last     ; If no addr, use last dump location
+    move.l  D0, A1
+    bra     .d_get_len
+.d_use_last:
+    move.l  LAST_DUMP, A1
+.d_get_len:
+    bsr     PARSE_HEX
+    beq     .d_default_len  ; If no len, apply default
+    move.l  D0, D2
+    bra     .d_line
+.d_default_len:
+    move.l  #$10, D2        ; Default 16 bytes
+.d_line:
+    move.l  A1, D0
+    bsr     PRINT_HEX32
+    move.b  #':', D0
+    bsr     PUTCHAR
+    move.b  #' ', D0
+    bsr     PUTCHAR
+    
+    move.l  A1, A2          ; Retain line start for ASCII dump
+    moveq   #0, D6          ; D6 tracks bytes printed this line
+.d_hex:
+    move.b  (A1)+, D0
+    bsr     PRINT_HEX8
+    move.b  #' ', D0
+    bsr     PUTCHAR
+    addq.w  #1, D6
+    
+    subq.l  #1, D2
+    beq     .d_ascii_pad    ; Break early if length exhausted
+    cmp.w   #16, D6
+    blt     .d_hex
+    bra     .d_ascii
+.d_ascii_pad:
+    move.w  #16, D4
+    sub.w   D6, D4
+    beq     .d_ascii        ; If strictly 16 printed, don't pad
+    subq.w  #1, D4          ; DbF loop adj
+.d_pad:
+    move.b  #' ', D0
+    bsr     PUTCHAR
+    bsr     PUTCHAR
+    bsr     PUTCHAR
+    dbf     D4, .d_pad
+.d_ascii:
+    move.w  D6, D4
+    subq.w  #1, D4          ; DbF loop adj
+.d_char:
+    move.b  (A2)+, D0
+    cmp.b   #$20, D0
+    blt     .d_dot
+    cmp.b   #$7E, D0
+    bgt     .d_dot
+    bra     .d_putc
+.d_dot:
+    move.b  #'.', D0
+.d_putc:
+    bsr     PUTCHAR
+    dbf     D4, .d_char
+    
+    bsr     PRINT_CRLF
+    
+    tst.l   D2
+    bne     .d_line
+    
+    move.l  A1, LAST_DUMP   ; Save boundary for next command
+    bra     MAIN_LOOP
+
+; --- F: Fill Memory ---
+CMD_F:
+    bsr     PARSE_HEX
+    beq     PRINT_ERR
+    move.l  D0, D4          ; Fill Byte placed safely in D4
+    bsr     PARSE_HEX
+    beq     PRINT_ERR
+    move.l  D0, A1          ; Start Addr
+    bsr     PARSE_HEX
+    beq     PRINT_ERR
+    move.l  D0, A2          ; End Addr OR Length
+    
+    cmpa.l  A1, A2
+    bgt     .f_loop         ; If End > Start, it is a valid End Address. Skip math.
+    
+    tst.l   D0              ; Ensure length is not 0
+    beq     MAIN_LOOP       
+    move.l  A1, A2
+    add.l   D0, A2          ; End = Start + Length
+    subq.l  #1, A2          ; Adjust to inclusive boundary
+.f_loop:
+    move.b  D4, (A1)+       ; Fill using byte stored in D4
+    cmpa.l  A2, A1
+    ble     .f_loop
+    bra     MAIN_LOOP
+
+; --- P: Punch (S-Records) ---
+CMD_P:
+    bsr     PARSE_HEX
+    beq     PRINT_ERR
+    move.l  D0, A1          ; Start
+    bsr     PARSE_HEX
+    beq     PRINT_ERR
+    move.l  D0, A2          ; End
+    
+    cmpa.l  A2, A1
+    bgt     PRINT_ERR       ; Safety check
+.p_loop:
+    move.l  A2, D2
+    sub.l   A1, D2
+    addq.l  #1, D2
+    cmp.l   #16, D2
+    ble     .p_len_ok
+    move.l  #16, D2
+.p_len_ok:
+    move.b  #'S', D0
+    bsr     PUTCHAR
+    move.b  #'2', D0          ; Output S2 (24-bit address)
+    bsr     PUTCHAR
+    
+    move.l  D2, D3
+    addq.b  #4, D3          ; Addr(3) + Checksum(1) overhead
+    move.b  D3, D0
+    bsr     PRINT_HEX8
+    move.b  D3, D4          ; Initial Checksum sum
+    
+    move.l  A1, D0          ; Address High byte
+    swap    D0
+    add.b   D0, D4
+    bsr     PRINT_HEX8
+    
+    move.l  A1, D0          ; Address Mid byte
+    lsr.w   #8, D0
+    add.b   D0, D4
+    bsr     PRINT_HEX8
+    
+    move.l  A1, D0          ; Address Low byte
+    add.b   D0, D4
+    bsr     PRINT_HEX8
+    
+    move.l  D2, D5
+    subq.l  #1, D5
+.p_data:
+    move.b  (A1)+, D0
+    add.b   D0, D4
+    bsr     PRINT_HEX8
+    dbf     D5, .p_data
+    
+    move.b  D4, D0
+    not.b   D0              ; Compute final 1's complement Checksum
+    bsr     PRINT_HEX8
+    
+    bsr     PRINT_CRLF
+    
+    cmpa.l  A2, A1
+    ble     .p_loop
+    
+    lea     STR_S8, A0      ; Output S8 terminator for 24-bit records
+    bsr     PRINT_STR
+    bra     MAIN_LOOP
+
+; --- L: Load S-Records ---
+CMD_L:
+.l_wait:
+    bsr     GETCHAR
+    cmp.b   #'S', D0
+    bne     .l_wait
+    bsr     GETCHAR
+    move.b  D0, D7          ; Save S-Record Type
+    
+    bsr     GET_HEX8
+    move.b  D0, D2          ; Total line length
+    move.b  D0, D4          ; Start checksum
+    
+    moveq   #0, D3          ; Address Acc
+    
+    cmp.b   #'1', D7
+    beq     .l_s1
+    cmp.b   #'9', D7
+    beq     .l_s1
+    moveq   #3, D5          ; S2 / S8 uses 3 address bytes
+    bra     .l_got_addr
+.l_s1:
+    moveq   #2, D5          ; S1 / S9 uses 2 address bytes
+.l_got_addr:
+    sub.b   D5, D2
+    subq.b  #1, D2          ; Calculate remaining payload length
+    
+.l_addr:
+    bsr     GET_HEX8
+    add.b   D0, D4
+    lsl.l   #8, D3
+    move.b  D0, D1
+    and.l   #$FF, D1
+    or.l    D1, D3
+    subq.b  #1, D5
+    bne     .l_addr
+    
+    move.l  D3, A1
+    tst.b   D2
+    beq     .l_chk          ; Skip payload if pure termination record
+    
+.l_data:
+    bsr     GET_HEX8
+    add.b   D0, D4
+    
+    cmp.b   #'8', D7
+    bge     .l_skip_wr      ; Safety: Never write payloads on S8/S9
+    move.b  D0, (A1)+
+.l_skip_wr:
+    subq.b  #1, D2
+    bne     .l_data
+
+.l_chk:
+    bsr     GET_HEX8
+    add.b   D0, D4
+    addq.b  #1, D4          ; Test calculated 1s complement
+    bne     .l_err
+    
+    cmp.b   #'8', D7        ; Is it termination? (S8 or S9)
+    bge     .l_done
+    
+    move.b  #'.', D0        ; Silent Progress Echo
+    bsr     PUTCHAR
+    bra     .l_wait
+
+.l_err:
+    move.b  #'?', D0        ; Silent Error Echo
+    bsr     PUTCHAR
+    bra     .l_wait
+
+.l_done:
+    bsr     PRINT_CRLF      ; Formats the success nicely
+    bra     MAIN_LOOP
+
+; --- G: Go Execution ---
+CMD_G:
+    bsr     PARSE_HEX
+    beq     .g_no_addr
+    move.l  D0, SAVE_PC
+.g_no_addr:
+    move.l  SAVE_PC, A0
+    movem.l SAVE_D0, D0-D7/A1-A6    ; Restore context
+    jsr     (A0)
+    movem.l D0-D7/A1-A6, SAVE_D0    ; Update context natively if returned via RTS
+    bra     MAIN_LOOP
+
+; --- R: Show Registers (Tabular Format) ---
+CMD_R:
+    lea     STR_R_PC, A0
+    bsr     PRINT_STR
+    move.l  SAVE_PC, D0
+    bsr     PRINT_HEX32
+    lea     STR_R_SR, A0
+    bsr     PRINT_STR
+    move.w  SAVE_SR, D0
+    bsr     PRINT_HEX16
+    lea     STR_R_SSP, A0
+    bsr     PRINT_STR
+    move.l  A7, D0
+    bsr     PRINT_HEX32
+    bsr     PRINT_CRLF
+    
+    lea     SAVE_D0, A2
+    moveq   #0, D6       ; Counter
+.r_loop_d:
+    lea     STR_R_D, A0
+    bsr     PRINT_STR
+    move.l  D6, D0
+    add.b   #'0', D0
+    bsr     PUTCHAR
+    lea     STR_R_EQ, A0
+    bsr     PRINT_STR
+    move.l  (A2)+, D0
+    bsr     PRINT_HEX32
+    
+    addq.l  #1, D6
+    cmp.l   #4, D6
+    bne     .r_no_nl_d
+    bsr     PRINT_CRLF
+.r_no_nl_d:
+    cmp.l   #8, D6
+    blt     .r_loop_d
+    
+    bsr     PRINT_CRLF
+    moveq   #0, D6
+.r_loop_a:
+    lea     STR_R_A, A0
+    bsr     PRINT_STR
+    move.l  D6, D0
+    add.b   #'0', D0
+    bsr     PUTCHAR
+    lea     STR_R_EQ, A0
+    bsr     PRINT_STR
+    move.l  (A2)+, D0
+    bsr     PRINT_HEX32
+    
+    addq.l  #1, D6
+    cmp.l   #4, D6
+    bne     .r_no_nl_a
+    bsr     PRINT_CRLF
+.r_no_nl_a:
+    cmp.l   #7, D6
+    blt     .r_loop_a
+    
+    bsr     PRINT_CRLF
+    bra     MAIN_LOOP
+
+; =====================================================================
+; UNIVERSAL STRING & HEX UTILITIES
+; =====================================================================
+
+PRINT_CRLF:
+    move.l  D0, -(A7)
+    move.b  #$0D, D0
+    bsr     PUTCHAR
+    move.b  #$0A, D0
+    bsr     PUTCHAR
+    move.l  (A7)+, D0
+    rts
+
+PRINT_STR:
+    movem.l D0-D1, -(A7)
+.ps_loop:
+    move.b  (A0)+, D0
+    beq     .ps_done
+    bsr     PUTCHAR
+    bra     .ps_loop
+.ps_done:
+    movem.l (A7)+, D0-D1
+    rts
+
+SKIP_SPACES:
+    move.b  (A0)+, D0
+    cmp.b   #' ', D0
+    beq     SKIP_SPACES
+    subq.l  #1, A0
+    rts
+
+PARSE_HEX:
+    bsr     SKIP_SPACES
+    moveq   #0, D0
+    moveq   #0, D1
+    moveq   #0, D2          ; Validation switch
+.ph_loop:
+    move.b  (A0)+, D1
+    beq     .ph_done        ; Stop on Null Terminator
+    cmp.b   #'$', D1
+    beq     .ph_loop        ; Safely ignore $ if typed
+    cmp.b   #'0', D1
+    blt     .ph_done
+    cmp.b   #'9', D1
+    ble     .ph_dig
+    cmp.b   #'a', D1
+    blt     .ph_up
+    cmp.b   #'z', D1
+    bgt     .ph_done
+    sub.b   #$20, D1
+.ph_up:
+    cmp.b   #'A', D1
+    blt     .ph_done
+    cmp.b   #'F', D1
+    bgt     .ph_done
+    sub.b   #$37, D1
+    bra     .ph_acc
+.ph_dig:
+    sub.b   #$30, D1
+.ph_acc:
+    lsl.l   #4, D0
+    or.b    D1, D0
+    moveq   #1, D2
+    bra     .ph_loop
+.ph_done:
+    subq.l  #1, A0
+    tst.b   D2              ; Sets Z status if strictly empty
+    rts
+
+PRINT_HEX32:
+    move.l  D0, -(A7)
+    swap    D0
+    bsr     PRINT_HEX16
+    move.l  (A7)+, D0
+    bsr     PRINT_HEX16
+    rts
+
+PRINT_HEX16:
+    move.w  D0, -(A7)
+    lsr.w   #8, D0
+    bsr     PRINT_HEX8
+    move.w  (A7)+, D0
+    bsr     PRINT_HEX8
+    rts
+
+PRINT_HEX8:
+    move.b  D0, -(A7)
+    lsr.b   #4, D0
+    bsr     NIBBLE_TO_CHAR
+    bsr     PUTCHAR
+    move.b  (A7)+, D0
+    and.b   #$0F, D0
+    bsr     NIBBLE_TO_CHAR
+    bsr     PUTCHAR
+    rts
+
+NIBBLE_TO_CHAR:
+    and.b   #$0F, D0
+    cmp.b   #9, D0
+    ble     .ntc_num
+    add.b   #$37, D0
+    rts
+.ntc_num:
+    add.b   #'0', D0
+    rts
+
+GET_HEX8:
+    move.l  D6, -(A7)
+    bsr     GETCHAR
+    bsr     CHAR_TO_HEX
+    lsl.b   #4, D0
+    move.b  D0, D6
+    bsr     GETCHAR
+    bsr     CHAR_TO_HEX
+    or.b    D6, D0
+    move.l  (A7)+, D6
+    rts
+
+CHAR_TO_HEX:
+    cmp.b   #'a', D0
+    blt     .cthu
+    sub.b   #$20, D0
+.cthu:
+    cmp.b   #'A', D0
+    blt     .cthn
+    sub.b   #$37, D0
+    rts
+.cthn:
+    sub.b   #'0', D0
+    rts
+
+; =====================================================================
+; REAL HARDWARE ABSTRACTION LAYER 
+; =====================================================================
+
+INIT_HW:
+    move.b  #$22, DUART_BASE+$05    ; Reset Receiver
+    move.b  #$38, DUART_BASE+$05    ; Reset Transmitter
+    move.b  #$10, DUART_BASE+$05    ; Reset MR pointer
+    move.b  #$13, DUART_BASE+$01    ; No Parity, 8 bits/char
+    move.b  #$07, DUART_BASE+$01    ; Normal mode, 1 Stop bit (8N1)
+    move.b  #$70, DUART_BASE+$09    ; Timer Mode (Ext/16), Baud Set 1
+    move.b  #$BB, DUART_BASE+$03    ; 9600 Baud Rx/Tx
+    move.b  #$00, DUART_BASE+$0B    ; Disable all interrupts (Polling Mode)
+    move.b  #$05, DUART_BASE+$05    ; Enable Tx & Rx
+    
+    move.b  #$20, DUART_BASE+$1D    ; Turn ON Amber LED (Set OP5 Low)
+    rts
+
+CHECK_RESET:
+    btst    #1, DUART_BASE+$1B      ; Check Stop Button (IP1 Active-Low)
+    beq     START_VEC               ; If 0 (Pushed), Hard Software Reboot!
+    rts
+
+GET_DIAL:
+    move.b  DUART_BASE+$1B, D0      ; Read Input Port
+    asr.b   #2, D0                  ; Shift IP2, IP3, IP4 to bottom
+    not.b   D0                      ; Invert active-low logic
+    and.b   #7, D0                  ; Mask to strictly 0-7
+    add.b   #'0', D0                ; Convert to ASCII char
+    rts
+
+LED_RED_ON:
+    move.b  #$80, DUART_BASE+$1F    ; Turn ON Red LED (Reset OP7 High)
+    rts
+
+LED_RED_OFF:
+    move.b  #$80, DUART_BASE+$1D    ; Turn OFF Red LED (Set OP7 Low)
+    rts
+
+PUTCHAR:
+    btst    #2, DUART_BASE+$03      ; Wait for TxRDY (Max Speed transmission)
+    beq     PUTCHAR
+    move.b  D0, DUART_BASE+$07      ; Emits to ODD byte lane
+    rts
+
+GETCHAR:
+    bsr     CHECK_RESET             ; Poll the stop button while waiting!
+    btst    #0, DUART_BASE+$03      ; Wait for RxRDY
+    beq     GETCHAR
+    move.b  DUART_BASE+$07, D0      ; Receives from ODD byte lane
+    rts
+
+GETLINE:
+    movem.l D1-D2, -(A7)
+    lea     LINE_BUF, A0
+.gl_loop:
+    bsr     GETCHAR
+    cmp.b   #$0D, D0
+    beq     .gl_done
+    cmp.b   #$0A, D0
+    beq     .gl_done
+    cmp.b   #$08, D0
+    beq     .gl_bs
+    cmp.b   #$7F, D0
+    beq     .gl_bs
+    bsr     PUTCHAR                 ; Hardware requires manual Local Echo
+    move.b  D0, (A0)+
+    bra     .gl_loop
+.gl_bs:
+    cmpa.l  #LINE_BUF, A0
+    beq     .gl_loop
+    subq.l  #1, A0
+    move.b  #$08, D0
+    bsr     PUTCHAR
+    move.b  #$20, D0
+    bsr     PUTCHAR
+    move.b  #$08, D0
+    bsr     PUTCHAR
+    bra     .gl_loop
+.gl_done:
+    clr.b   (A0)
+    bsr     PRINT_CRLF
+    movem.l (A7)+, D1-D2
+    rts
+
+; =====================================================================
+; CONSTANT STRINGS (Manually padded to guarantee strictly EVEN lengths)
+; =====================================================================
+
+STR_BANNER: DC.B $0D, $0A
+            DC.B '========================================', $0D, $0A
+            DC.B ' 68K-MON System Monitor (Hardware Build)', $0D, $0A
+            DC.B '========================================', $0D, $0A, 0, 0
+
+STR_HELP:   DC.B 'Commands:                                                 ', $0D, $0A
+            DC.B '  E <Reg> <Val>        : Edit Reg (e.g. E D0, E PC, E A7) ', $0D, $0A
+            DC.B '  M <Addr>             : Modify Memory                    ', $0D, $0A
+            DC.B '  D [Addr] [Len]       : Hex Dump                         ', $0D, $0A
+            DC.B '  L                    : Load S-Records                   ', $0D, $0A
+            DC.B '  P <Start> <End>      : Punch S-Records                  ', $0D, $0A
+            DC.B '  F <Byte> <Beg> <End> : Fill RAM (Len can substitute End)', $0D, $0A
+            DC.B '  G [Addr]             : Execute                          ', $0D, $0A
+            DC.B '  R                    : Show Registers                   ', $0D, $0A
+            DC.B '  ? or H               : Show Help                        ', $0D, $0A, 0, 0
+
+STR_PROMPT: DC.B '6', '8', 'K', '-', 'M', 'O', 'N', ' ', 0
+STR_P_TAIL: DC.B '>', ' ', 0, 0
+STR_ERR:    DC.B 'E', 'r', 'r', 'o', 'r', 0
+STR_R_PC:   DC.B 'P','C','=','$'
+STR_R_SR:   DC.B ' ',' ','S','R','=','$'
+STR_R_SSP:  DC.B ' ',' ','S','S','P','=','$',' '
+STR_R_D:    DC.B ' ',' ','D',0
+STR_R_A:    DC.B ' ',' ','A',0
+STR_R_EQ:   DC.B '=','$'
+STR_S8:     DC.B 'S', '8', '0', '4', '0', '0', '0', '0', '0', '0', 'F', 'B', $0D, $0A, 0, 0
+
+    END     START
