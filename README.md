@@ -12,7 +12,7 @@ Video exploration and teardown of Compugraphic 9000PS on [Adrian's Digital Basem
 Original dumps of the ROMs from this machine are available at [https://archive.org/details/agfa-computgraphi-9000-ps](https://archive.org/details/agfa-computgraphi-9000-ps)
 
 ### Hardware Notes
-* **The "Ghost" Memory:** The board uses a simple 3-to-8 address decoder connected to address lines `A16`, `A17`, and `A18`. Because `A19-A23` are ignored, the entire 512KB physical memory map echoes infinitely throughout the 68000's 16MB address space.
+* **RAM select logic:** The board uses a simple 3-to-8 address decoder connected to address lines `A16`, `A17`, and `A18`. Because `A19-A23` are ignored, the entire 512KB physical memory map echoes infinitely throughout the 68000's 16MB address space.
 * **Polled I/O:** The original vector table was entirely blank (`$FFFFFFFF`) or pointed to infinite loops. The board relies 100% on polling and does not use hardware interrupts.
 * **The 68681 DUART Does Everything:** Because it's the only major logic chip on the board, the DUART isn't just used for serial communication. Its General Purpose I/O pins control the front panel LEDs, read the front panel numeric dial, read the Stop button, and manage the MK4501 FIFO flags.
 * **Odd-Byte Lane:** The DUART is wired exclusively to the lower half of the 16-bit data bus (`D0-D7`), meaning its registers only exist at odd memory addresses.
