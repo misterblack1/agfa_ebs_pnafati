@@ -82,7 +82,7 @@ You can write your own 68k assembly programs, assemble them to Motorola S-Record
 ---
 
 ## Building the Code (Unified Source)
-The `68K-MON.X68` source file is written for **Easy68K**. It contains a unified Hardware Abstraction Layer at the bottom of the file.
+The `swtbug-v6.m68` source file is written for **Easy68K**. Assembled, it will run on the real hardware.
 
 **To build for Physical EPROMs:**
 In Easy68K, you need to assembly the code. Then use SIM68k to load the assembled code and use the memory viewer to save the first 64k of address space to a BIN file. This is your ROM code to run on real hardware. You must byte split the file as real hardware requires two 8 bit EPROMs.
