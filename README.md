@@ -88,5 +88,6 @@ In Easy68K, you need to assembly the code. Then use SIM68k to load the assembled
 ---
 
 ## Included Example: Mandelbrot Generator
-Included in this repo is `mandelbrot.X68`. This is an example user program meant to be loaded into RAM at `$010100`. 
-Because the 68000 lacks an FPU, this program uses **4.12 Fixed-Point Arithmetic** to natively calculate and render an ASCII Mandelbrot fractal directly to the serial terminal, proving the stability of the API vectors and the hardware's math execution.
+Included in this repo is `fractal calculation-v6.x68`. This is an example user program meant to be loaded into RAM at `$010100` using but using the `L` command and pasting the S-records from `fractal calculation-v6.S68` into your terminal window. Use `G 10100` to start the program.
+
+Because the 68000 lacks an FPU, this program uses **Fixed-Point Arithmetic** to natively calculate and render an ASCII Mandelbrot fractal directly to the serial terminal, proving the stability of the API vectors and the hardware's math execution.
