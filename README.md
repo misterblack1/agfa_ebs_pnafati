@@ -4,8 +4,6 @@
 
 ![Boot message](https://github.com/misterblack1/agfa_ebs_pnafati/blob/main/images/Boot.png?raw=true)
 
-This repository documents the reverse-engineering of the board's undocumented memory map, DUART wiring, and front-panel logic, culminating in a custom 64KB ROM that turns the printer controller into a fully programmable 68k single-board computer.
-
 ## Reverse-Engineering
 This project started with this board containing a 68000 CPU, 64K of ROM, 16KB of SRAM, an MC68681 Dual UART (DUART), an MK4501N High-Speed FIFO, and a front panel with a numeric dial and LEDs. By dumping and forensically analyzing the original ROM, we deduced the address decoder logic and peripheral wiring.
 
