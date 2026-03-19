@@ -83,7 +83,7 @@ run
 Ready
 ```
 Completes the fractal in 81 seconds. Pretty fast!
-(Benchmarks results for other systems)[https://docs.google.com/spreadsheets/d/1Sdh9vmm8RKGiE1-sTh9ThjFogLAoTg3M-5rL7LBWBUI/edit?usp=sharing]
+[Benchmarks results for other systems](https://docs.google.com/spreadsheets/d/1Sdh9vmm8RKGiE1-sTh9ThjFogLAoTg3M-5rL7LBWBUI/edit?usp=sharing)
 
 ## 1. System Memory Overview
 
