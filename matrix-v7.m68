@@ -1,0 +1,368 @@
+; =====================================================================
+; Matrix Digital Rain
+; Target: Custom 68K-MON Hardware (Easy68K Compatible)
+;
+; Assembles to RAM at $010100
+; Uses VT100 Escape Codes, LFSR Random Generator, and Delta-Rendering
+; =====================================================================
+
+    ORG $010100
+
+; -----------------------------------------------------------------------------
+; Monitor API Vectors (from 68K-MON)
+; -----------------------------------------------------------------------------
+PUTCHAR     EQU $0406       ; Prints D0.B character to terminal
+EXIT_PROG   EQU $041E       ; Returns to monitor prompt
+
+; -----------------------------------------------------------------------------
+; Hardware Addresses
+; -----------------------------------------------------------------------------
+DUART_IN    EQU $04001B     ; Front panel input port (Bit 1 = Stop Button)
+
+; -----------------------------------------------------------------------------
+; Constants
+; -----------------------------------------------------------------------------
+SCREEN_COLS EQU 80          ; Terminal width
+SCREEN_ROWS EQU 25          ; Terminal height
+
+; =====================================================================
+; Main Program
+; =====================================================================
+
+START:
+    movem.l D0-D7/A0-A6, -(SP)  ; Save all registers
+
+    ; 1. Clear the Drop Tracking Arrays in RAM
+    movea.l #DROPS_Y, A0
+    move.w  #SCREEN_COLS-1, D0  ; Clear 80 Y positions
+.clear_y:
+    clr.b   (A0)+
+    dbf     D0, .clear_y
+
+    movea.l #DROPS_LEN, A0
+    move.w  #SCREEN_COLS-1, D0  ; Clear 80 length values
+.clear_len:
+    clr.b   (A0)+
+    dbf     D0, .clear_len
+
+    ; 2. Initialize VT100 Terminal
+    bsr     INIT_TERMINAL
+
+    ; 3. Initialize random seed
+    move.w  #$1234, RAND_SEED
+
+    ; 4. Main animation loop
+MAIN_LOOP:
+    move.w  #0, D6              ; D6 = X_COLUMN counter (0 to 79)
+
+.col_loop:
+    ; --- Check Hardware Stop Button ---
+    btst    #1, DUART_IN         ; Check IP1 (Active-Low button)
+    beq     .check_button_release ; Button pressed - check if released
+    
+    bra     .continue_loop       ; Button not pressed, continue
+
+.check_button_release:
+    ; Wait for button to be released before exiting
+    btst    #1, DUART_IN
+    beq     .check_button_release
+
+    ; Button is now released - proceed to exit
+    bra     EXIT_ROUTINE
+
+.continue_loop:
+
+    ; --- Load Drop State for this column ---
+    movea.l #DROPS_Y, A2
+    move.b  (A2, D6), D7         ; D7 = Current Y position (0 = inactive)
+    tst.b   D7
+    bne     .active_drop
+
+.inactive_drop:
+    ; Column is empty - should we spawn a new drop?
+    bsr     GET_RANDOM         ; Get new random value
+    and.w   #$7FFF, D0         ; Mask to 0-32767
+    cmp.w   #50, D0            ; ~0.15% chance to spawn
+    bhi     .next_col
+    
+    ; Spawn a new drop!
+    move.b  #1, (A2, D6)        ; Set Y to 1 (starts at top)
+    
+    ; Assign random length (5 to 20 characters)
+    bsr     GET_RANDOM
+    and.w   #$F, D0            ; Random 0-15
+    add.w   #5, D0             ; Length = 5 to 20
+    
+    ; Store length in separate array
+    movea.l #DROPS_LEN, A3
+    move.b  D0, (A3, D6)
+    bra     .next_col
+
+.active_drop:
+    ; --- Get drop length ---
+    movea.l #DROPS_LEN, A3
+    move.b  (A3, D6), D4        ; D4 = drop length
+    
+    ; --- Calculate tail position ---
+    move.w  D7, D5              ; D5 = current Y (head position)
+    sub.w   D4, D5              ; D5 = tail Y position
+    
+    ; --- Draw the head (if on screen) ---
+    cmp.w   #SCREEN_ROWS, D7    ; Is head at or past bottom?
+    bge     .skip_head_draw
+    
+    ; Position cursor at (D6, D7)
+    move.w  D6, D1              ; X coordinate (0-79)
+    add.w   #1, D1              ; Convert to 1-80
+    move.w  D7, D2              ; Y coordinate (0-24)
+    add.w   #1, D2              ; Convert to 1-25
+    
+    ; Print ESC [
+    moveq   #27, D0
+    bsr     PUT_CHAR
+    move.b  #'['
+    bsr     PUT_CHAR
+    
+    ; Print Y
+    move.w  D2, D0
+    bsr     PRINT_DEC
+    
+    move.b  #';', D0
+    bsr     PUT_CHAR
+    
+    ; Print X
+    move.w  D1, D0
+    bsr     PRINT_DEC
+    
+    move.b  #'H', D0
+    bsr     PUT_CHAR
+    
+    ; Generate random ASCII character (33-126)
+    bsr     GET_RANDOM
+    and.w   #$7F, D0           ; 0-127
+    add.w   #33, D0            ; 33-160
+    cmp.w   #126, D0
+    ble     .char_ok
+    sub.w   #94, D0             ; Wrap around
+.char_ok:
+    bsr     PUT_CHAR
+.skip_head_draw:
+
+    ; --- Erase the tail (if on screen) ---
+    tst.w   D5                  ; Is tail above screen?
+    ble     .advance_drop       ; Yes, skip erase
+    
+    cmp.w   #SCREEN_ROWS, D5    ; Is tail at or past bottom?
+    bge     .advance_drop       ; Yes, skip erase
+    
+    ; Position cursor at (D6, D5)
+    move.w  D6, D1              ; X coordinate
+    add.w   #1, D1
+    move.w  D5, D2              ; Y coordinate
+    add.w   #1, D2
+    
+    ; Print ESC [
+    moveq   #27, D0
+    bsr     PUT_CHAR
+    move.b  #'['
+    bsr     PUT_CHAR
+    
+    ; Print Y
+    move.w  D2, D0
+    bsr     PRINT_DEC
+    
+    move.b  #';', D0
+    bsr     PUT_CHAR
+    
+    ; Print X
+    move.w  D1, D0
+    bsr     PRINT_DEC
+    
+    move.b  #'H', D0
+    bsr     PUT_CHAR
+    
+    ; Print space to erase
+    moveq   #' ', D0
+    bsr     PUT_CHAR
+
+.advance_drop:
+    ; --- Move drop down one row ---
+    addq.b  #1, D7
+    move.b  D7, (A2, D6)        ; Store updated Y position
+    
+    ; --- Check if drop is completely off-screen ---
+    cmp.w   #SCREEN_ROWS+20, D7 ; Allow extra space for long tails
+    blt     .next_col
+    
+.kill_drop:
+    clr.b   (A2, D6)            ; Reset drop to inactive
+    bra     .next_col
+
+.next_col:
+    add.w   #1, D6              ; X++
+    cmp.w   #SCREEN_COLS, D6
+    blt     .col_loop           ; If X < 80, process next column
+    
+    bra     MAIN_LOOP
+
+; =====================================================================
+; Subroutines
+; =====================================================================
+
+EXIT_ROUTINE:
+    ; Show cursor: ESC [ ? 25 h
+    moveq   #27, D0
+    bsr     PUT_CHAR
+    move.b  #'[', D0
+    bsr     PUT_CHAR
+    move.b  #'?', D0
+    bsr     PUT_CHAR
+    move.b  #'2', D0
+    bsr     PUT_CHAR
+    move.b  #'5', D0
+    bsr     PUT_CHAR
+    move.b  #'h', D0
+    bsr     PUT_CHAR
+    
+    ; Clear screen: ESC [ 2 J
+    moveq   #27, D0
+    bsr     PUT_CHAR
+    move.b  #'[', D0
+    bsr     PUT_CHAR
+    move.b  #'2', D0
+    bsr     PUT_CHAR
+    move.b  #'J', D0
+    bsr     PUT_CHAR
+    
+    ; Home cursor: ESC [ H
+    moveq   #27, D0
+    bsr     PUT_CHAR
+    move.b  #'[', D0
+    bsr     PUT_CHAR
+    move.b  #'H', D0
+    bsr     PUT_CHAR
+    
+    ; Flush output buffer
+    move.w  #$3000, D0
+.flush_delay:
+    dbf     D0, .flush_delay
+    
+    movem.l (SP)+, D0-D7/A0-A6
+    jmp     EXIT_PROG
+
+; -----------------------------------------------------------------------------
+; INIT_TERMINAL - Set up VT100 terminal for the effect
+; -----------------------------------------------------------------------------
+INIT_TERMINAL:
+    movem.l D0/A0, -(SP)
+    
+    ; Clear screen: ESC [ 2 J
+    moveq   #27, D0
+    bsr     PUT_CHAR
+    move.b  #'[', D0
+    bsr     PUT_CHAR
+    move.b  #'2', D0
+    bsr     PUT_CHAR
+    move.b  #'J', D0
+    bsr     PUT_CHAR
+    
+    ; Hide cursor: ESC [ ? 25 l
+    moveq   #27, D0
+    bsr     PUT_CHAR
+    move.b  #'[', D0
+    bsr     PUT_CHAR
+    move.b  #'?', D0
+    bsr     PUT_CHAR
+    move.b  #'2', D0
+    bsr     PUT_CHAR
+    move.b  #'5', D0
+    bsr     PUT_CHAR
+    move.b  #'l', D0
+    bsr     PUT_CHAR
+    
+    movem.l (SP)+, D0/A0
+    rts
+
+; -----------------------------------------------------------------------------
+; PUT_CHAR - Output character via monitor API
+; Input: D0.B = character to print
+; -----------------------------------------------------------------------------
+PUT_CHAR:
+    movem.l D0/D1, -(SP)
+    move.b  D0, D1
+    jsr     PUTCHAR
+    movem.l (SP)+, D0/D1
+    rts
+
+; -----------------------------------------------------------------------------
+; PRINT_DEC - Print 1-2 digit decimal number
+; Input: D0.W = number (1-99)
+; FIXED: Now correctly extracts both tens and ones digits
+; -----------------------------------------------------------------------------
+PRINT_DEC:
+    movem.l D1, -(SP)
+    
+    ; Save the original number for later to get remainder
+    move.w  D0, D1              ; D1 = copy of number to print
+    
+    ; Extract tens digit
+    divu    #10, D1             ; D1 = quotient:remainder (quotient in lower, remainder in upper)
+    move.w  D1, D2              ; D2 = quotient:remainder
+    and.w   #$FFF0, D2          ; Clear lower bits to get quotient
+    cmp.w   #0, D2              ; Is quotient zero?
+    beq     .ones_only
+    
+    ; Print tens digit
+    and.w   #$000F, D1          ; Get quotient (tens digit)
+    add.b   #'0', D1            ; Convert to ASCII
+    move.b  D1, D0
+    bsr     PUT_CHAR
+    
+.ones_only:
+    ; Get ones digit from remainder (upper word of original division)
+    move.w  D0, D1              ; Reload original number
+    divu    #10, D1             ; Divide again to get remainder
+    swap    D1                  ; Move remainder to lower word
+    and.w   #$000F, D1          ; Mask to get ones digit
+    add.b   #'0', D1            ; Convert to ASCII
+    move.b  D1, D0
+    bsr     PUT_CHAR
+    
+    movem.l (SP)+, D1
+    rts
+
+; -----------------------------------------------------------------------------
+; GET_RANDOM - 16-bit Fibonacci LFSR (maximal length 65535)
+; Returns: D0.W = random number
+; -----------------------------------------------------------------------------
+GET_RANDOM:
+    movem.l D1, -(SP)
+    move.w  RAND_SEED, D0
+    
+    lsr.w   #1, D0
+    bcc     .no_xor
+    eor.w   #$8401, D0
+    
+.no_xor:
+    move.w  D0, RAND_SEED
+    
+    movem.l (SP)+, D1
+    rts
+
+; =====================================================================
+; End of Program
+; =====================================================================
+
+    ORG     $010100+1024        ; Place data 1KB after code start
+
+; Data arrays - must be in RAM
+DROPS_Y:
+    DCB.B   80, 0               ; 80 bytes, initialized to 0
+
+DROPS_LEN:
+    DCB.B   80, 0               ; 80 bytes, initialized to 0
+
+RAND_SEED:
+    DC.W    $1234               ; Random seed
+
+    END     START
