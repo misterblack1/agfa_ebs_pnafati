@@ -1,6 +1,6 @@
-# 68K-MON: Custom MONITOR ROM for the Agfa Compugraphic 9000PS I/O board with BASIC in ROM
+# 68K-MON: Custom MONITOR ROM and BASIC for the Agfa Compugraphic 9000PS I/O board
 
-**68K-MON** is a fully functional, SWTBUG-like ROM monitor built from scratch for the Motorola 68000-based I/O board inside the Agfa Compugraphic 9000PS RIP (Raster Image Processor.) The I/O board is maked `AGFA EBS PNAFATI1++A`.
+**68K-MON** is a fully functional, SWTBUG-like ROM monitor built from scratch for the Motorola 68000-based I/O board inside the Agfa Compugraphic 9000PS RIP (Raster Image Processor.) The I/O board is maked `AGFA EBS PNAFATI1++A`. This ROM not includes BASIC in ROM, which can be started by typing `g 1400`.
 
 ![Boot message](https://github.com/misterblack1/agfa_ebs_pnafati/blob/main/images/Boot.png?raw=true)
 
@@ -103,7 +103,7 @@ The `STOP` button on the front panel will only work when at the prompt, due to t
 ---
 
 ## Included Example: Mandelbrot Generator
-Included in this repo is `fractal calculation-v6.x68`. This is an example user program meant to be loaded into RAM at `$010100` using but using the `L` command and pasting the S-records from `fractal calculation-v6.S68` into your terminal window. Use `G 10100` to start the program.
+The program `fractal calculation-v6.x68` and the associated S-records in `fractal calculation-v6.S68` will calculate and display a fractal image. Load this into RAM by using the `L` command and then pasting the S-records into the terminal. The code will load at `$010100`. Use `G 10100` to start the program.
 
 Because the 68000 lacks an FPU, this program uses **Fixed-Point Arithmetic** to natively calculate and render an ASCII Mandelbrot fractal directly to the serial terminal, proving the stability of the API vectors and the hardware's math execution.
 
@@ -132,3 +132,11 @@ The Fractal generator is based on this BASIC program: (author unknown)
 220 PRINT
 230 NEXT Y
 ```
+
+## Included Example: Full Screen Matrix Effect
+
+The program `matrix-alt-v7.m68` and the assembled S-Records in `matrix-alt-v7.S68` will display a full screen animating Matrix like effect using VT100 escape codes. 
+
+Start with `g 10100` and push the `STOP` button to exit back to the MONITOR.
+
+![Matrix Effect](https://github.com/misterblack1/agfa_ebs_pnafati/blob/main/images/matrix-effect.png?raw=true)
