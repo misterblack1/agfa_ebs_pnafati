@@ -1,10 +1,12 @@
 # EhBASIC Port for the Agfa EBS PNAFITA1++A (I/O controller from the Agfa Compugraphic 9000PS)
 
-Enhanced BASIC for the Motorola MC680xx by Jeff Tranter (tranter@pobox.com)
+Enhanced BASIC for the Motorola MC680xx
 
 ```
 Copyright(C) 2002-12 by Lee Davison. This program may be freely distributed
 for personal use only. All commercial rights are reserved.
+
+For commercial use please contact me at leeedavison@lgooglemail.com for conditions.
 ```
 
 The code needed to modified to run within the constraints of this system. Start ROM-BASIC with a `g 1400` you will see this:
